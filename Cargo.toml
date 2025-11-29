@@ -1,0 +1,11 @@
+[package]
+name = "rlox"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+phf = { version = "0.13.1", features = ["macros"] }
+scopeguard = "1.2.0"
+
+[lints.rust]
+dead_code = "allow"
