@@ -1,6 +1,6 @@
 use std::{env, fs, io::{self, Write}};
 
-use rlox::vm::VM;
+use rlox::{vm::VM};
 
 fn repl(vm: &mut VM) -> io::Result<()> {
     let mut line = String::new();
@@ -15,7 +15,10 @@ fn repl(vm: &mut VM) -> io::Result<()> {
                 return Ok(());
             }
             Ok(_) => {
-                vm.interpret(line.as_str()).unwrap();
+                match vm.interpret(line.as_str()) {
+                    Ok(value) => println!("return {:?}", value),
+                    Err(e)    => eprintln!("{}", e),
+                }
             }
             Err(e) => {
                 return Err(e);

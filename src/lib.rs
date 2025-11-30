@@ -1,12 +1,33 @@
 pub mod scanner;
 pub mod compiler;
 pub mod vm;
+pub mod value;
 pub mod util;
 
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, scanner::{Scanner, TokenType}, vm::Op};
+    use crate::{compiler, scanner::{Scanner, TokenType}, value::Value, vm::{Chunk, Op, VM}};
+    
+    #[test]
+    fn vm() {
+        let mut chunk = Chunk::new();
+        chunk
+            .push_constant(Value::Number(5.0), 0)
+            .push_constant(Value::Number(5.0), 0)
+            .push_operation(Op::Add, 0)
+            .push_constant(Value::Number(4.0), 0)
+            .push_operation(Op::Sub, 0)
+            .push_constant(Value::Number(3.0), 0)
+            .push_operation(Op::Mul, 0)
+            .push_constant(Value::Number(2.0), 0)
+            .push_operation(Op::Div, 0)
+            .push_operation(Op::Negate, 0)
+            .push_operation(Op::Return, 0);
+        let mut vm = VM::new();
+        vm.load_chunk(chunk);
+        assert_eq!(vm.execute_loaded_chunk(), Ok(Value::Number(-9.0)));
+    }
 
     #[test]
     fn scanner() {
@@ -19,6 +40,7 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Equal);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Semicolon);
+        assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Eof);
 
         // Test number tokens
         let src = "5 5.0 5. .5";
@@ -27,6 +49,7 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
+        assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Eof);
 
         // Math 
         let src = "5.0 + 5.0 - 5.0 * 5.0 / 5.0";
@@ -40,6 +63,7 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Slash);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Number);
+        assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Eof);
 
         // Function definition
         let src = "fn foo() { print(\"foo\"); }";
@@ -55,6 +79,7 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::RParen);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Semicolon);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::RBrace);
+        assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Eof);
 
         // stuct def
         let src = "struct Foo {\n
@@ -74,6 +99,7 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Str);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Semicolon);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::RBrace);
+        assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Eof);
         assert_eq!(scanner.line, 4);
     }
 

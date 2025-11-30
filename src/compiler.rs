@@ -4,7 +4,8 @@ use strum_macros::EnumIter;
 use crate::{
     scanner::{
         Scanner, Token, TokenType
-    }, vm::{Chunk, Op, Value}
+    }, vm::{Chunk, Op},
+    value::Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
@@ -63,12 +64,28 @@ struct ParseRule<'a> {
     // Get parse rule based on the token type
     fn get(t: TokenType) -> Self {
         match t {
+            // Syntax
             TokenType::LParen => ParseRule::new(Some(Compiler::grouping), None,                   Precedence::None),
-            TokenType::Minus  => ParseRule::new(Some(Compiler::unary),    Some(Compiler::binary), Precedence::Term),
-            TokenType::Plus   => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Term),
-            TokenType::Slash  => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Factor),
-            TokenType::Star   => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Factor),
+            
+            // Operations
+            TokenType::Minus       => ParseRule::new(Some(Compiler::unary),    Some(Compiler::binary), Precedence::Term),
+            TokenType::Bang        => ParseRule::new(Some(Compiler::unary),    None,                   Precedence::Unary),
+            TokenType::Plus        => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Term),
+            TokenType::Slash       => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Factor),
+            TokenType::Star        => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Factor),
+            TokenType::Equate      => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::BangEqual   => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::GreaterThan => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::GreaterEq   => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::LessThan    => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::LessEq      => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+
+            // Literals
             TokenType::Number => ParseRule::new(Some(Compiler::number),   None,                   Precedence::None),
+            TokenType::Str    => ParseRule::new(Some(Compiler::string),   None,                   Precedence::None),
+            TokenType::True |
+            TokenType::False =>  ParseRule::new(Some(Compiler::literal),  None,                   Precedence::None),
+            TokenType::Nil   =>  ParseRule::new(Some(Compiler::literal),  None,                   Precedence::None),
             
             _ => ParseRule::empty(),
         }
@@ -138,13 +155,35 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Assignment)
     }
 
+    fn string(&mut self) -> Result<(), String> {
+        if let Some(value) = self.previous.unwrap().slice
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+        {
+            self.emit_constant(Value::from_str(value));
+            Ok(())
+        } else {
+            Err("expected a string literal.".to_string())
+        }
+    }
+
     fn number(&mut self) -> Result<(), String> {
         if let Ok(value) = self.previous.unwrap().slice.parse() {
-            self.emit_constant(value);
+            self.emit_constant(Value::Number(value));
             Ok(())
         } else {
             Err("expected a number literal.".to_string())
         }
+    }
+
+    fn literal(&mut self) -> Result<(), String> {
+        match self.previous.unwrap().t_type {
+            TokenType::False => self.emit_op(Op::False),
+            TokenType::True  => self.emit_op(Op::True),
+            TokenType::Nil   => self.emit_op(Op::Nil),
+            _ => return Err("invalid literal expression.".to_string()),
+        }
+        Ok(())
     }
 
     fn unary(&mut self) -> Result<(), String> {
@@ -153,9 +192,12 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Unary)?;
 
         match op_type {
-            TokenType::Minus => { self.emit_op(Op::Negate); Ok(()) }
-            _ => Err("invalid unary operation.".to_string())
+            TokenType::Minus => self.emit_op(Op::Negate),
+            TokenType::Bang  => self.emit_op(Op::Not),
+            _ => return Err("invalid unary operation.".to_string()),
         }
+
+        Ok(())
     }
     
     fn binary(&mut self) -> Result<(), String> {
@@ -172,6 +214,12 @@ impl<'a> Compiler<'a> {
             TokenType::Minus => self.emit_op(Op::Sub),
             TokenType::Star => self.emit_op(Op::Mul),
             TokenType::Slash => self.emit_op(Op::Div),
+            TokenType::Equate      => self.emit_op(Op::Equal),
+            TokenType::BangEqual   => self.emit_op(Op::NotEqual),
+            TokenType::GreaterThan => self.emit_op(Op::GreaterThan),
+            TokenType::GreaterEq   => self.emit_op(Op::GreaterEq),
+            TokenType::LessThan    => self.emit_op(Op::LessThan),
+            TokenType::LessEq      => self.emit_op(Op::LessEq),
             _ => return Err("invalid operand for binary expression.".to_string()),
         }
 
@@ -197,12 +245,12 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
    
     // Pump the compiler.
     if let Err(e) = compiler.consume() {
-        return Err(format!("Error at line {}: {}", compiler.scanner.line, e));
+        return Err(format!("Error consuming first eppression: {}", e));
     }
     
     // Compile the source.
     if let Err(e) = compiler.expression() {
-        return Err(format!("Error at line {}: {}", compiler.scanner.line, e));
+        return Err(format!("Error at line {}: {}", compiler.current.unwrap().line, e));
     }
 
     // Make sure Eof has been reached.

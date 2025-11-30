@@ -2,20 +2,38 @@
 use std::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    compiler, util::KeyedArray
+    compiler, util::KeyedArray, value::Value,
 };
 
-pub type Value = f64;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Op {
     LoadConst(usize),
+    True,
+    False,
+    Nil,
+    
+    Not,
     Negate,
+    
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterEq,
+    LessThan,
+    LessEq,
+
     Add,
     Sub,
     Mul,
     Div,
+    
     Return,
+}
+
+#[derive(Debug, Clone)]
+pub enum StaticMem {
+    Str(String),
 }
 
 #[derive(Clone)]
@@ -28,14 +46,18 @@ impl std::fmt::Debug for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\n")?;
         for (op, line) in &self.code {
-            write!(f, "[{:04}] - {:?}\n", line, op)?;
+            if let Op::LoadConst(idx) = op {
+                write!(f, "[{:04}] - {:?} - {:?}\n", line, op, self.constants[*idx])?;
+            } else {
+                write!(f, "[{:04}] - {:?}\n", line, op)?;
+            }
         }
         Ok(())
     }
 }
 
 impl Chunk {
-    const SIZE: usize = 512;
+    const SIZE: usize = 128;
 
     pub fn new() -> Self {
         Self {
@@ -62,8 +84,9 @@ impl Chunk {
 }
 
 pub struct VM {
-    stack: VecDeque<f64>,
+    stack: VecDeque<Value>,
     chunk: Option<Chunk>,
+    line: usize,
 }
 
 impl VM {
@@ -71,58 +94,89 @@ impl VM {
         Self {
             stack: VecDeque::new(),
             chunk: None,
+            line: 0,
         }
     }
     
-    pub fn interpret(&mut self, src: &str) -> Result<(), String> {
+    pub fn interpret(&mut self, src: &str) -> Result<Value, String> {
         self.chunk = Some(compiler::compile(src)?);
-        self.execute_loaded_chunk();
-        Ok(())
+        match self.execute_loaded_chunk() {
+            Ok(v)  => Ok(v),
+            Err(e) => Err(format!("Runtime error, at line {}: {}", self.line, e))
+        }
     }
 
-    fn binary_op(op: Op, lhs: Value, rhs: Value) -> Option<Value> {
+    fn binary_op(op: Op, lhs: Value, rhs: Value) -> Result<Value, String> {
         match op {
-            Op::Add => Some(lhs + rhs),
-            Op::Sub => Some(lhs - rhs),
-            Op::Mul => Some(lhs * rhs),
-            Op::Div => Some(lhs / rhs),
-            _ => None,
+            Op::Add => lhs.add(rhs),
+            Op::Sub => lhs.sub(rhs),
+            Op::Mul => lhs.mul(rhs),
+            Op::Div => lhs.div(rhs),
+
+            Op::Equal     => Ok(Value::Bool(lhs == rhs)),
+            Op::NotEqual  => Ok(Value::Bool(lhs != rhs)),
+            Op::GreaterThan   => lhs.compare(rhs, ">"), 
+            Op::GreaterEq => lhs.compare(rhs, ">="),
+            Op::LessThan      => lhs.compare(rhs, "<"),
+            Op::LessEq    => lhs.compare(rhs, "<="),
+            _ => Err("invalid binary operation.".to_string()),
         }
     }
 
     fn unary_op(op: Op, v: Value) -> Option<Value> {
         match op {
-            Op::Negate => Some(-v), 
+            Op::Negate => v.unary('-'), 
+            Op::Not    => v.unary('!'),
             _ => None,
         }
     }
-
-    fn execute_loaded_chunk(&mut self) {
-        if self.chunk.is_none() { return }
+    
+    pub fn load_chunk(&mut self, chunk: Chunk) {
+        self.chunk = Some(chunk);
+    }
+    
+    pub fn execute_loaded_chunk(&mut self) -> Result<Value, String> {
+        if self.chunk.is_none() { return Err("no chunk has been loaded.".to_string()); }
         
-        if let Some(chunk) = &self.chunk {
-            for (op, _line) in &chunk.code {
+        if let Some(chunk) = &mut self.chunk {
+            for (op, line) in &chunk.code {
+                self.line = *line;
                 match op {
+                    // Push
                     Op::LoadConst(idx) => {
-                        let value = chunk.constants[*idx];
+                        let value = chunk.constants[*idx].clone();
+                        chunk.constants.remove(*idx); // Once a constant is consumed it can be freed (for now?).
                         self.stack.push_back(value);
                     },
-                    Op::Add | Op::Sub | Op::Mul | Op::Div => {
+                    Op::True => self.stack.push_back(Value::Bool(true)),
+                    Op::False => self.stack.push_back(Value::Bool(false)),
+                    Op::Nil => self.stack.push_back(Value::Nil),
+
+                    // Pop
+                    Op::Add     | Op::Sub       | Op::Mul | Op::Div |
+                    Op::Equal   | Op::NotEqual  |
+                    Op::GreaterThan | Op::GreaterEq |
+                    Op::LessThan    | Op::LessEq => {
                         let rhs = self.stack.pop_back().expect("Expected item on the stack.");
                         let lhs = self.stack.pop_back().expect("Expected item on the stack.");
-                        self.stack.push_back(Self::binary_op(*op, lhs, rhs).unwrap());
+                        self.stack.push_back(Self::binary_op(*op, lhs, rhs)?);
                     }
-                    Op::Negate => {
-                        let v = self.stack.pop_back().expect("Expecte item on the stack.");
-                        self.stack.push_back(Self::unary_op(*op, v).unwrap());
+                    Op::Negate | Op::Not => {
+                        let v = self.stack.pop_back().expect("Expected item on the stack.");
+                        if let Some(v) = Self::unary_op(*op, v) {
+                            self.stack.push_back(v);
+                        } else { return Err("type mismatch on unary operation.".to_string()); }
                     }
                     Op::Return => {
-                        println!("return: {}", self.stack.pop_back().unwrap_or(Value::default()));
+                        // Temporary return behaviour
+                        return Ok(self.stack.pop_back().unwrap_or(Value::Nil));
                     }
                 }
             }
         }
 
         self.chunk = None;
+        
+        return Ok(Value::Nil);
     }
 }

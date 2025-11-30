@@ -6,7 +6,7 @@ pub struct KeyedArray<T> {
     free_locations: VecDeque<usize>,
 }
 
-impl<T: Copy> KeyedArray<T> {
+impl<T: Clone> KeyedArray<T> {
     pub fn new(n: usize) -> Self {
         let mut a = Vec::<Option<T>>::new();
         a.resize(n, None);
@@ -14,8 +14,6 @@ impl<T: Copy> KeyedArray<T> {
             array: a,
             free_locations: (0..n).collect(),
         }
-        
-
     }
 
     pub fn push(&mut self, value: T) -> usize {
@@ -39,7 +37,7 @@ impl<T: Copy> KeyedArray<T> {
     }
 }
 
-impl<T: Copy> Index<usize> for KeyedArray<T> {
+impl<T: Clone> Index<usize> for KeyedArray<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -47,7 +45,7 @@ impl<T: Copy> Index<usize> for KeyedArray<T> {
     }
 }
 
-impl<T: Copy> IndexMut<usize> for KeyedArray<T> {
+impl<T: Clone> IndexMut<usize> for KeyedArray<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         self.array[index].as_mut().expect("Attempted to index unallocated ID")
     }

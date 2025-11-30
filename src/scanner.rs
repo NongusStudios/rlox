@@ -24,7 +24,7 @@ pub enum TokenType {
 
     // Keywords
     And, Struct, Else, False,
-    For, Fn, If, None, Or,
+    For, Fn, If, Nil, Or,
     Print, Return, Super, StructSelf,
     True, Let,
     
@@ -57,7 +57,7 @@ impl<'a> Scanner<'a> {
         "for"    => TokenType::For,
         "fn"     => TokenType::Fn,
         "if"     => TokenType::If,
-        "none"   => TokenType::None,
+        "nil"   => TokenType::Nil,
         "or"     => TokenType::Or,
         "print"  => TokenType::Print,
         "return" => TokenType::Return,
