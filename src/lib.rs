@@ -6,7 +6,7 @@ pub mod util;
 
 #[cfg(test)]
 mod tests {
-    use crate::scanner::{Scanner, TokenType};
+    use crate::{compiler, scanner::{Scanner, TokenType}, vm::Op};
 
     #[test]
     fn scanner() {
@@ -75,5 +75,22 @@ mod tests {
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::Semicolon);
         assert_eq!(scanner.scan_token().unwrap().t_type, TokenType::RBrace);
         assert_eq!(scanner.line, 4);
+    }
+
+    #[test]
+    fn compiler() {
+        // Test math expression
+        let src = "-(5 + 4) * 2 / 2";
+        let mut chunk = compiler::compile(src).unwrap();
+        let mut iter = chunk.code.iter_mut().map(|(op, _)| op);
+
+        assert_eq!(*iter.next().unwrap(), Op::LoadConst(0));
+        assert_eq!(*iter.next().unwrap(), Op::LoadConst(1));
+        assert_eq!(*iter.next().unwrap(), Op::Add);
+        assert_eq!(*iter.next().unwrap(), Op::Negate);
+        assert_eq!(*iter.next().unwrap(), Op::LoadConst(2));
+        assert_eq!(*iter.next().unwrap(), Op::Mul);
+        assert_eq!(*iter.next().unwrap(), Op::LoadConst(3));
+        assert_eq!(*iter.next().unwrap(), Op::Div);
     }
 }

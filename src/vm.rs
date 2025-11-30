@@ -2,16 +2,15 @@
 use std::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    util::{
-        KeyedArray,
-    }
+    compiler, util::KeyedArray
 };
 
-type Value = f64;
+pub type Value = f64;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Op {
     LoadConst(usize),
+    Negate,
     Add,
     Sub,
     Mul,
@@ -21,8 +20,18 @@ pub enum Op {
 
 #[derive(Clone)]
 pub struct Chunk {
-    code: Vec<Op>,
+    pub code: Vec<(Op, usize)>,
     constants: KeyedArray<Value>,
+}
+
+impl std::fmt::Debug for Chunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\n")?;
+        for (op, line) in &self.code {
+            write!(f, "[{:04}] - {:?}\n", line, op)?;
+        }
+        Ok(())
+    }
 }
 
 impl Chunk {
@@ -39,15 +48,15 @@ impl Chunk {
         self.constants.push(value) 
     }
 
-    pub fn push_constant(&mut self, value: Value) -> &mut Self {
+    pub fn push_constant(&mut self, value: Value, line: usize) -> &mut Self {
         let idx = self.add_constant(value);
 
-        self.code.push(Op::LoadConst(idx));
+        self.code.push((Op::LoadConst(idx), line));
         self
     }
 
-    pub fn push_operation(&mut self, op: Op) -> &mut Self {
-        self.code.push(op);
+    pub fn push_operation(&mut self, op: Op, line: usize) -> &mut Self {
+        self.code.push((op, line));
         self
     }
 }
@@ -66,16 +75,25 @@ impl VM {
     }
     
     pub fn interpret(&mut self, src: &str) -> Result<(), String> {
-        todo!()
+        self.chunk = Some(compiler::compile(src)?);
+        self.execute_loaded_chunk();
+        Ok(())
     }
 
-    fn binary_op(op: Op, lhs: Value, rhs: Value) -> Value {
+    fn binary_op(op: Op, lhs: Value, rhs: Value) -> Option<Value> {
         match op {
-            Op::Add => lhs + rhs,
-            Op::Sub => lhs - rhs,
-            Op::Mul => lhs * rhs,
-            Op::Div => lhs / rhs,
-            _ => Value::default(),
+            Op::Add => Some(lhs + rhs),
+            Op::Sub => Some(lhs - rhs),
+            Op::Mul => Some(lhs * rhs),
+            Op::Div => Some(lhs / rhs),
+            _ => None,
+        }
+    }
+
+    fn unary_op(op: Op, v: Value) -> Option<Value> {
+        match op {
+            Op::Negate => Some(-v), 
+            _ => None,
         }
     }
 
@@ -83,16 +101,20 @@ impl VM {
         if self.chunk.is_none() { return }
         
         if let Some(chunk) = &self.chunk {
-            for op in &chunk.code {
+            for (op, _line) in &chunk.code {
                 match op {
                     Op::LoadConst(idx) => {
                         let value = chunk.constants[*idx];
                         self.stack.push_back(value);
                     },
                     Op::Add | Op::Sub | Op::Mul | Op::Div => {
-                        let rhs = self.stack.pop_back().expect("Expected item in the stack.");
-                        let lhs = self.stack.pop_back().expect("Expected item in the stack.");
-                        self.stack.push_back(Self::binary_op(*op, lhs, rhs));
+                        let rhs = self.stack.pop_back().expect("Expected item on the stack.");
+                        let lhs = self.stack.pop_back().expect("Expected item on the stack.");
+                        self.stack.push_back(Self::binary_op(*op, lhs, rhs).unwrap());
+                    }
+                    Op::Negate => {
+                        let v = self.stack.pop_back().expect("Expecte item on the stack.");
+                        self.stack.push_back(Self::unary_op(*op, v).unwrap());
                     }
                     Op::Return => {
                         println!("return: {}", self.stack.pop_back().unwrap_or(Value::default()));

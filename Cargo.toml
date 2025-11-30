@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 phf = { version = "0.13.1", features = ["macros"] }
-scopeguard = "1.2.0"
+strum = "0.27"
+strum_macros = "0.27"
 
 [lints.rust]
 dead_code = "allow"

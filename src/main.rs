@@ -36,6 +36,6 @@ fn main() {
 
     if args.len() == 1 { repl(&mut vm).unwrap(); }
     else if args.len() == 2 {
-
+        run_file(&mut vm, args[1].as_str());
     }
 }
