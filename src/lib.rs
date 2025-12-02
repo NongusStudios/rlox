@@ -106,17 +106,92 @@ mod tests {
     #[test]
     fn compiler() {
         // Test math expression
-        let src = "-(5 + 4) * 2 / 2";
-        let mut chunk = compiler::compile(src).unwrap();
-        let mut iter = chunk.code.iter_mut().map(|(op, _)| op);
+        let src = "-(5 + 4) * 2 / 2;";
+        let chunk = compiler::compile(src).unwrap();
+        
+        let expected = [
+            Op::LoadConst(0),
+            Op::LoadConst(1),
+            Op::Add,
+            Op::Negate,
+            Op::LoadConst(2),
+            Op::Mul,
+            Op::LoadConst(3),
+            Op::Div,
+            Op::Pop,
+        ];
 
-        assert_eq!(*iter.next().unwrap(), Op::LoadConst(0));
-        assert_eq!(*iter.next().unwrap(), Op::LoadConst(1));
-        assert_eq!(*iter.next().unwrap(), Op::Add);
-        assert_eq!(*iter.next().unwrap(), Op::Negate);
-        assert_eq!(*iter.next().unwrap(), Op::LoadConst(2));
-        assert_eq!(*iter.next().unwrap(), Op::Mul);
-        assert_eq!(*iter.next().unwrap(), Op::LoadConst(3));
-        assert_eq!(*iter.next().unwrap(), Op::Div);
+        for (i, (op, _)) in chunk.code.iter().enumerate() {
+            assert_eq!(*op, expected[i]);  
+        }
+
+        // Test boolean expressions
+        let src = "true and false or false and false;";
+        let chunk = compiler::compile(src).unwrap();
+
+        let expected = [
+            Op::True,
+            Op::False,
+            Op::And,
+            Op::False,
+            Op::False,
+            Op::And,
+            Op::Or,
+            Op::Pop,    
+        ];
+
+        for (i, (op, _)) in chunk.code.iter().enumerate() {
+            assert_eq!(*op, expected[i]);  
+        }
+
+        // Test strings
+        let src = "\"Hello, \" + \"World\";";
+        let chunk = compiler::compile(src).unwrap();
+
+        let expected = [
+            Op::LoadConst(0),
+            Op::LoadConst(1),
+            Op::Add,
+            Op::Pop,    
+        ];
+
+        for (i, (op, _)) in chunk.code.iter().enumerate() {
+            assert_eq!(*op, expected[i]);  
+        }
+
+        // Test comparison
+        let src = "5 == 5 and 5 != 4 and 5 > 4 and 4 < 5 and 5 >= 4 and 4 <= 5;";
+        let chunk = compiler::compile(src).unwrap();
+
+        let expected = [
+            Op::LoadConst(0),
+            Op::LoadConst(1),
+            Op::Equal,
+            Op::LoadConst(2),
+            Op::LoadConst(3),
+            Op::NotEqual,
+            Op::And,
+            Op::LoadConst(4),
+            Op::LoadConst(5),
+            Op::GreaterThan,
+            Op::And,
+            Op::LoadConst(6),
+            Op::LoadConst(7),
+            Op::LessThan,
+            Op::And,
+            Op::LoadConst(8),
+            Op::LoadConst(9),
+            Op::GreaterEq,
+            Op::And,
+            Op::LoadConst(10),
+            Op::LoadConst(11),
+            Op::LessEq,
+            Op::And,
+            Op::Pop,    
+        ];
+
+        for (i, (op, _)) in chunk.code.iter().enumerate() {
+            assert_eq!(*op, expected[i]);  
+        }
     }
 }

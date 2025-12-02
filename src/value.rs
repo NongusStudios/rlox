@@ -105,4 +105,39 @@ impl Value {
             Ok(v)
         } else { Err(format!("only numerical types are comparable, near {}", op)) }
     }
+
+    pub fn and(self, rhs: Value) -> Result<Value, String> {
+        let value = match self {
+            Self::Bool(l) => if let Self::Bool(r) = rhs {
+                Some(Self::Bool(l && r))
+            } else { None }
+            _ => None,
+        };
+        
+        if let Some(v) = value {
+            Ok(v)
+        } else { Err("only boolean values can be used for 'and' operation.".to_string())}
+    }
+
+    pub fn or(self, rhs: Value) -> Result<Value, String> {
+        let value = match self {
+            Self::Bool(l) => if let Self::Bool(r) = rhs {
+                Some(Self::Bool(l || r))
+            } else { None }
+            _ => None,
+        };
+        
+        if let Some(v) = value {
+            Ok(v)
+        } else { Err("only boolean values can be used for 'and' operation.".to_string())}
+    }
+
+    pub fn print(self) {
+        match self {
+            Self::Bool(b) => print!("{}", b),
+            Self::Number(n) => print!("{}", n),
+            Self::Str(s) => print!("{}", s),
+            Self::Nil => print!("nil"),
+        }
+    }
 }

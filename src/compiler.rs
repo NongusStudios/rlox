@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -31,11 +33,12 @@ fn next_precedence(p: Precedence) -> Option<Precedence> {
 pub struct Compiler<'a> {
     chunk:    &'a mut Chunk,
     scanner:  Scanner<'a>,
+    variable_lut: HashMap<&'a str, usize>,
     previous: Option<Token<'a>>,
     current:  Option<Token<'a>>,
 }
 
-type ParseFn<'a> = fn(&mut Compiler<'a>) -> Result<(), String>;
+type ParseFn<'a> = fn(&mut Compiler<'a>, Precedence) -> Result<(), String>;
 struct ParseRule<'a> {
     prefix: Option<ParseFn<'a>>,
     infix:  Option<ParseFn<'a>>,
@@ -79,6 +82,10 @@ struct ParseRule<'a> {
             TokenType::GreaterEq   => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
             TokenType::LessThan    => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
             TokenType::LessEq      => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Comparison),
+            TokenType::And         => ParseRule::new(None,                     Some(Compiler::binary), Precedence::And),
+            TokenType::Or          => ParseRule::new(None,                     Some(Compiler::binary), Precedence::Or),
+
+            TokenType::Identifier  => ParseRule::new(Some(Compiler::variable), None,                   Precedence::None),
 
             // Literals
             TokenType::Number => ParseRule::new(Some(Compiler::number),   None,                   Precedence::None),
@@ -97,11 +104,12 @@ impl<'a> Compiler<'a> {
         Self {
             chunk,
             scanner: Scanner::new(source),
+            variable_lut: HashMap::new(),
             previous: None,
             current: None,
         }
     }
-    
+
     fn emit_constant(&mut self, value: Value) {
         self.chunk.push_constant(value, self.scanner.line);
     }
@@ -134,15 +142,19 @@ impl<'a> Compiler<'a> {
         let rule = ParseRule::get(self.previous.unwrap().t_type);
         if let Some(prefix) = rule.prefix {
             // Run found prefix expression.
-            prefix(self)?;
+            prefix(self, p)?;
             
             // Keep compiling tokens until a higher precedence is reached.
             while p <= ParseRule::get(self.current.unwrap().t_type).precedence {
                 self.consume()?;
                 let rule = ParseRule::get(self.previous.unwrap().t_type);
                 if let Some(infix) = rule.infix {
-                    infix(self)?;
+                    infix(self, p)?;
                 } else { break; }
+            }
+            
+            if p <= Precedence::Assignment && self.match_and_consume(TokenType::Equal)? {
+                Err("invalid assignment target.".to_string())?;
             }
 
             Ok(())
@@ -155,7 +167,7 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    fn string(&mut self) -> Result<(), String> {
+    fn string(&mut self, _: Precedence) -> Result<(), String> {
         if let Some(value) = self.previous.unwrap().slice
             .strip_prefix('"')
             .and_then(|s| s.strip_suffix('"'))
@@ -167,7 +179,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn number(&mut self) -> Result<(), String> {
+    fn number(&mut self, _: Precedence) -> Result<(), String> {
         if let Ok(value) = self.previous.unwrap().slice.parse() {
             self.emit_constant(Value::Number(value));
             Ok(())
@@ -176,7 +188,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn literal(&mut self) -> Result<(), String> {
+    fn literal(&mut self, _: Precedence) -> Result<(), String> {
         match self.previous.unwrap().t_type {
             TokenType::False => self.emit_op(Op::False),
             TokenType::True  => self.emit_op(Op::True),
@@ -186,7 +198,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn unary(&mut self) -> Result<(), String> {
+    fn unary(&mut self, _: Precedence) -> Result<(), String> {
         let op_type = self.previous.unwrap().t_type;
         
         self.parse_precedence(Precedence::Unary)?;
@@ -200,7 +212,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
     
-    fn binary(&mut self) -> Result<(), String> {
+    fn binary(&mut self, _: Precedence) -> Result<(), String> {
         let op_type = self.previous.unwrap().t_type;
         
         let rule = ParseRule::get(op_type);
@@ -220,13 +232,15 @@ impl<'a> Compiler<'a> {
             TokenType::GreaterEq   => self.emit_op(Op::GreaterEq),
             TokenType::LessThan    => self.emit_op(Op::LessThan),
             TokenType::LessEq      => self.emit_op(Op::LessEq),
+            TokenType::And         => self.emit_op(Op::And),
+            TokenType::Or          => self.emit_op(Op::Or),
             _ => return Err("invalid operand for binary expression.".to_string()),
         }
 
         Ok(())
     }
 
-    fn grouping(&mut self) -> Result<(), String> {
+    fn grouping(&mut self, _: Precedence) -> Result<(), String> {
         if let Err(e) = self.expression() {
             return Err(e);
         }
@@ -234,6 +248,94 @@ impl<'a> Compiler<'a> {
         match self.match_and_consume(TokenType::RParen) {
             Ok(result) => if result { Ok(()) }
                           else      { Err("expected ')' after expression.".to_string()) }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn identifier_constant(&mut self) -> usize {
+        let name = self.previous.unwrap().slice;
+        if let Some(global) = self.variable_lut.get(name) {
+            *global
+        } else {
+            let global = self.chunk.add_constant(Value::from_str(self.previous.unwrap().slice));
+            self.variable_lut.insert(name, global);
+            global
+        }
+    }
+
+    fn named_variable(&mut self, can_assign: bool) -> Result<(), String> {
+        let global = self.identifier_constant();
+        if can_assign && self.match_and_consume(TokenType::Equal)? {
+            self.expression()?;
+            self.emit_op(Op::SetGlobal(global));
+        } else {
+            self.emit_op(Op::GetGlobal(global));
+        }
+
+        Ok(())
+    }
+
+    fn variable(&mut self, p: Precedence) -> Result<(), String> {
+        self.named_variable(p <= Precedence::Assignment)?;
+        Ok(())
+    }
+
+    fn parse_variable(&mut self, e: &str) -> Result<usize, String> {
+        if self.match_and_consume(TokenType::Identifier)? {
+            Ok(self.identifier_constant())
+        } else { Err(e.to_string()) }
+    }
+
+    fn declaration(&mut self) -> Result<(), String> {
+        let result = if self.match_and_consume(TokenType::Let)? {
+            self.let_declaration()
+        } else {
+            self.statement()
+        };
+
+        if let Err(e) = result {
+            Err(format!("Compile Error: at line {}: {}", self.scanner.line, e))
+        } else { Ok(()) }
+    }
+
+    fn let_declaration(&mut self) -> Result<(), String> {
+        let global = self.parse_variable("expected variable name.")?;
+        if self.match_and_consume(TokenType::Equal)? {
+            self.expression()?;
+        } else {
+            self.emit_op(Op::Nil);
+        }
+        
+        if self.match_and_consume(TokenType::Semicolon)? {
+            self.emit_op(Op::DefineGlobal(global));
+            Ok(())
+        } else {
+            Err("expected ';' after variable declaration.".to_string())
+        }
+    }
+
+    fn statement(&mut self) -> Result<(), String> {
+        if self.match_and_consume(TokenType::Print)? {
+            self.print_statement()
+        } else {
+            self.expression_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<(), String> {
+        self.expression()?;
+        match self.match_and_consume(TokenType::Semicolon) {
+            Ok(result) => if result { self.emit_op(Op::Print); Ok(()) }
+                          else      { Err("expected ';' after expression.".to_string()) }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn expression_statement(&mut self) -> Result<(), String> {
+        self.expression()?;
+        match self.match_and_consume(TokenType::Semicolon) {
+            Ok(result) => if result { self.emit_op(Op::Pop); Ok(()) }
+                          else      { Err("expected ';' after expression.".to_string()) }
             Err(e) => Err(e),
         }
     }
@@ -245,22 +347,15 @@ pub fn compile(source: &str) -> Result<Chunk, String> {
    
     // Pump the compiler.
     if let Err(e) = compiler.consume() {
-        return Err(format!("Error consuming first eppression: {}", e));
+        return Err(format!("Compile Error: consuming first eppression: {}", e));
     }
     
     // Compile the source.
-    if let Err(e) = compiler.expression() {
-        return Err(format!("Error at line {}: {}", compiler.current.unwrap().line, e));
+    loop {
+        match compiler.match_and_consume(TokenType::Eof) {
+            Ok(result) => if !result { compiler.declaration()?; }
+                          else       { break Ok(dbg!(chunk)) }
+            Err(e) => break Err(e),
+        }
     }
-
-    // Make sure Eof has been reached.
-    match compiler.match_and_consume(TokenType::Eof) {
-        Ok(result) => if !result { return Err("expected end of expression.".to_string()); }
-        Err(e)     => return Err(format!("Error ran out of tokens: {}", e)),
-    }
-    
-    compiler.emit_op(Op::Return);
-
-    // Emit compiled chunk
-    Ok(dbg!(chunk))
 }

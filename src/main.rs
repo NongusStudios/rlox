@@ -15,9 +15,8 @@ fn repl(vm: &mut VM) -> io::Result<()> {
                 return Ok(());
             }
             Ok(_) => {
-                match vm.interpret(line.as_str()) {
-                    Ok(value) => println!("return {:?}", value),
-                    Err(e)    => eprintln!("{}", e),
+                if let Err(e) = vm.interpret(line.as_str()) {
+                    eprintln!("{}", e);
                 }
             }
             Err(e) => {
